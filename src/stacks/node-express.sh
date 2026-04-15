@@ -1,0 +1,10 @@
+# Stack: Node.js + Express + TypeScript
+TECH_STACK="Node.js 22, Express 5, TypeScript 5.x, PostgreSQL"
+TEST_FRAMEWORK="Vitest"
+LINT_CMD="npx eslint . --fix && npx prettier --write ."
+TEST_CMD="npx vitest run"
+BUILD_CMD="npx tsc"
+DEV_CMD="npx tsx watch src/index.ts"
+FORMAT_CMD="npx prettier --write"
+LINT_FILE_CMD="npx eslint --fix"
+PKG_MANAGER="npm"

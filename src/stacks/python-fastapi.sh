@@ -1,0 +1,10 @@
+# Stack: Python + FastAPI
+TECH_STACK="Python 3.12+, FastAPI, SQLAlchemy 2, PostgreSQL, Pydantic v2"
+TEST_FRAMEWORK="pytest + pytest-asyncio"
+LINT_CMD="ruff check --fix . && ruff format ."
+TEST_CMD="pytest"
+BUILD_CMD="echo 'No build step for Python'"
+DEV_CMD="uvicorn app.main:app --reload"
+FORMAT_CMD="ruff format"
+LINT_FILE_CMD="ruff check --fix"
+PKG_MANAGER="pip"

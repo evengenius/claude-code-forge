@@ -1,0 +1,10 @@
+# Stack: React + TypeScript + Vite
+TECH_STACK="React 19, TypeScript 5.x, Vite, Tailwind CSS 4"
+TEST_FRAMEWORK="Vitest + Testing Library"
+LINT_CMD="npx eslint . --fix && npx prettier --write ."
+TEST_CMD="npx vitest run"
+BUILD_CMD="npm run build"
+DEV_CMD="npm run dev"
+FORMAT_CMD="npx prettier --write"
+LINT_FILE_CMD="npx eslint --fix"
+PKG_MANAGER="npm"

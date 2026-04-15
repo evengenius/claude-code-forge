@@ -1,0 +1,10 @@
+# Stack: Next.js + TypeScript + Prisma + PostgreSQL
+TECH_STACK="Next.js 15 (App Router), TypeScript 5.x, Prisma ORM, PostgreSQL, Tailwind CSS 4, shadcn/ui"
+TEST_FRAMEWORK="Vitest + Testing Library"
+LINT_CMD="npx eslint . --fix && npx prettier --write ."
+TEST_CMD="npx vitest run"
+BUILD_CMD="npm run build"
+DEV_CMD="npm run dev"
+FORMAT_CMD="npx prettier --write"
+LINT_FILE_CMD="npx eslint --fix"
+PKG_MANAGER="npm"
