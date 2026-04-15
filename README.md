@@ -54,8 +54,8 @@
 ### Установка и запуск
 
 ```bash
-# Скачать скрипт
-curl -fsSL https://raw.githubusercontent.com/Evengenius/claude-code-forge/main/init-claude-project.sh -o init-claude-project.sh
+# Скачать скрипт (v2 — модульная архитектура)
+curl -fsSL https://raw.githubusercontent.com/Evengenius/claude-code-forge/v2/init-claude-project.sh -o init-claude-project.sh
 chmod +x init-claude-project.sh
 
 # Создать проект
@@ -83,6 +83,34 @@ code my-project
 # В Claude Code вставьте содержимое INIT_PROMPT.md
 # или выполните: /project:freshstart
 ```
+
+---
+
+## Архитектура Forge (v2)
+
+В v2.0.0 монолитный скрипт (~1200 строк) разбит на модули:
+
+```
+claude-code-forge/
+├── init-claude-project.sh   # Entry point (~125 строк): ввод, source модулей, вызов функций
+├── src/
+│   ├── core.sh              # Все функции создания: generate_from_template, settings.json, git
+│   ├── stacks/              # Конфигурация стеков — один файл = один стек
+│   │   ├── nextjs.sh
+│   │   ├── react-vite.sh
+│   │   ├── node-express.sh
+│   │   ├── python-fastapi.sh
+│   │   └── custom.sh
+│   └── templates/           # Чистые .md/.tpl файлы с плейсхолдерами __VAR__
+│       ├── base/            # Общие для всех уровней
+│       ├── commands/        # Slash-команды
+│       ├── rules/           # Модульные правила
+│       ├── docs/            # Шаблоны документации
+│       ├── standard/        # Memory Bank + ADR (уровень 2+)
+│       └── full/            # Quality Gates (уровень 3)
+```
+
+**Добавить новый стек = один новый файл** в `src/stacks/` с 8 переменными (`TECH_STACK`, `TEST_CMD`, `BUILD_CMD` и др.) — никаких изменений в остальном коде.
 
 ---
 
@@ -453,8 +481,9 @@ paths:
 
 Pull requests приветствуются. Особенно интересны:
 
-- Новые пресеты тех-стеков (Go, Rust, PHP/Laravel, и т.д.)
-- Кастомные slash-команды для специфичных workflow
+- **Новые стеки** — создайте `src/stacks/your-stack.sh` с 8 переменными и добавьте одну строку `case` в `init-claude-project.sh` (Go, Rust, PHP/Laravel и т.д.)
+- **Новые slash-команды** — добавьте `.md` файл в `src/templates/commands/`
+- **Новые шаблоны** — `src/templates/` разбиты по уровням, добавление не затрагивает остальной код
 - Интеграции с CI/CD (GitHub Actions, GitLab CI)
 - Переводы README на другие языки
 - Реальные кейсы использования
