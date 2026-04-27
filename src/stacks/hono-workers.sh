@@ -1,0 +1,10 @@
+# Stack: Hono + Cloudflare Workers + Drizzle + PostgreSQL (Neon)
+TECH_STACK="Hono 4.x, Cloudflare Workers, TypeScript 5.x, Drizzle ORM, PostgreSQL (Neon), Better-Auth, Zod"
+TEST_FRAMEWORK="Vitest + miniflare"
+LINT_CMD="pnpm lint"
+TEST_CMD="pnpm test"
+BUILD_CMD="pnpm build"
+DEV_CMD="pnpm dev"
+FORMAT_CMD="pnpm prettier --write"
+LINT_FILE_CMD="pnpm eslint --fix"
+PKG_MANAGER="pnpm"

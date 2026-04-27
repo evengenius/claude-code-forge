@@ -1,0 +1,10 @@
+# Stack: Expo + React Native + Next.js (web) + Tamagui (universal UI)
+TECH_STACK="Expo SDK 52, React Native 0.76, Expo Router 4, Next.js 15 (App Router), Tamagui, TypeScript 5.x, Drizzle ORM, PowerSync (offline-first sync)"
+TEST_FRAMEWORK="Vitest (unit) + Maestro (mobile e2e) + Playwright (web e2e)"
+LINT_CMD="pnpm lint"
+TEST_CMD="pnpm test"
+BUILD_CMD="pnpm build"
+DEV_CMD="pnpm dev"
+FORMAT_CMD="pnpm prettier --write"
+LINT_FILE_CMD="pnpm eslint --fix"
+PKG_MANAGER="pnpm"

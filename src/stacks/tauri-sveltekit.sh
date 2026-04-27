@@ -1,0 +1,10 @@
+# Stack: Tauri 2 + SvelteKit + TypeScript (cross-platform: Web + Desktop + Mobile)
+TECH_STACK="Tauri 2.0, SvelteKit 2, TypeScript 5.x, Tailwind CSS 4, shadcn-svelte, Drizzle ORM, SQLite (local), PostgreSQL (server)"
+TEST_FRAMEWORK="Vitest (unit) + Playwright (e2e + component) + cargo test (Rust)"
+LINT_CMD="pnpm lint"
+TEST_CMD="pnpm test"
+BUILD_CMD="pnpm build"
+DEV_CMD="pnpm dev"
+FORMAT_CMD="pnpm prettier --write"
+LINT_FILE_CMD="pnpm eslint --fix"
+PKG_MANAGER="pnpm"
