@@ -14,6 +14,25 @@
 
 set -euo pipefail
 
+# ── Проверка зависимостей ──────────────────────────────────────────────────
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: требуется команда '$1', не найдена в PATH" >&2
+    exit 1
+  fi
+}
+
+require_cmd git
+require_cmd python3
+require_cmd grep
+
+# jq нужен для хуков Claude Code (auto-format, защита от опасных команд).
+# Если не установлен — настройка не падает, но в финале выводится предупреждение.
+JQ_AVAILABLE=1
+if ! command -v jq >/dev/null 2>&1; then
+  JQ_AVAILABLE=0
+fi
+
 # ── Цвета и форматирование ──────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -63,6 +82,20 @@ fi
 
 if [ -z "$PROJECT_NAME" ]; then
   print_error "Имя проекта не может быть пустым"
+  exit 1
+fi
+
+# Валидация: только латинские буквы, цифры, точка, дефис, подчёркивание.
+# Исключает path traversal, пробелы, shell-метасимволы.
+if ! printf '%s' "$PROJECT_NAME" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]*$'; then
+  print_error "Недопустимое имя проекта: '$PROJECT_NAME'"
+  print_error "Допустимы только латинские буквы, цифры, точка, дефис, подчёркивание (первый символ — буква или цифра)."
+  exit 1
+fi
+
+# Защита от перезаписи существующей директории/файла.
+if [ -e "$PROJECT_NAME" ]; then
+  print_error "Путь '$PROJECT_NAME' уже существует — отказ от перезаписи."
   exit 1
 fi
 
@@ -155,6 +188,11 @@ echo "  3) Full     — + BMAD-совместимая структура + ка�
 read -r METHOD_LEVEL
 METHOD_LEVEL="${METHOD_LEVEL:-2}"
 
+if ! printf '%s' "$METHOD_LEVEL" | grep -qE '^[123]$'; then
+  print_error "Уровень методологии должен быть 1, 2 или 3 (введено: '$METHOD_LEVEL')"
+  exit 1
+fi
+
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BOLD}Создаю проект:${NC} $PROJECT_NAME"
@@ -199,20 +237,44 @@ print_substep "Структура директорий создана"
 
 print_step "Генерирую CLAUDE.md..."
 
-cat > CLAUDE.md << 'CLAUDE_EOF'
-# Project: __PROJECT_NAME__
+# Безопасная генерация файлов из шаблонов с переменными.
+# Используем python3 (более надёжно для произвольного контента, чем sed).
+render_template() {
+  # $1 — путь файла; шаблон читается со stdin.
+  # Подставляются переменные через os.environ.
+  local out="$1"
+  PROJECT_NAME="$PROJECT_NAME" \
+  PROJECT_DESC="$PROJECT_DESC" \
+  TECH_STACK="$TECH_STACK" \
+  TEST_FRAMEWORK="$TEST_FRAMEWORK" \
+  DEV_CMD="$DEV_CMD" \
+  BUILD_CMD="$BUILD_CMD" \
+  TEST_CMD="$TEST_CMD" \
+  LINT_CMD="$LINT_CMD" \
+  python3 -c '
+import os, sys
+template = sys.stdin.read()
+for key in ("PROJECT_NAME","PROJECT_DESC","TECH_STACK","TEST_FRAMEWORK",
+            "DEV_CMD","BUILD_CMD","TEST_CMD","LINT_CMD"):
+    template = template.replace("{{" + key + "}}", os.environ.get(key, ""))
+sys.stdout.write(template)
+' > "$out"
+}
 
-__PROJECT_DESC__
+render_template CLAUDE.md << 'CLAUDE_EOF'
+# Project: {{PROJECT_NAME}}
+
+{{PROJECT_DESC}}
 
 ## Tech Stack
-- __TECH_STACK__
-- Tests: __TEST_FRAMEWORK__
+- {{TECH_STACK}}
+- Tests: {{TEST_FRAMEWORK}}
 
 ## Build & Run
-- `__DEV_CMD__` — dev server
-- `__BUILD_CMD__` — production build
-- `__TEST_CMD__` — run tests
-- `__LINT_CMD__` — lint + format
+- `{{DEV_CMD}}` — dev server
+- `{{BUILD_CMD}}` — production build
+- `{{TEST_CMD}}` — run tests
+- `{{LINT_CMD}}` — lint + format
 
 ## Architecture
 - TODO: Описать архитектуру после первой сессии планирования
@@ -234,42 +296,30 @@ __PROJECT_DESC__
 - TODO: Заполняется итеративно по мере обнаружения проблем
 
 ## Reference Documents
-- @docs/ARCHITECTURE.md — архитектурный обзор
-- @PLANNING.md — стратегия и процесс
-- @TASKS.md — текущие задачи
+В начале каждой задачи прочитай:
+- `docs/ARCHITECTURE.md` — архитектурный обзор
+- `PLANNING.md` — стратегия и процесс
+- `TASKS.md` — текущие задачи
 CLAUDE_EOF
-
-# Подстановка переменных (совместимо с macOS и Linux)
-replace_in_file() {
-  local pattern="$1" file="$3"
-  # Escape & in replacement (special char in sed)
-  local replacement
-  replacement=$(printf '%s' "$2" | sed 's/&/\\&/g')
-  if sed --version >/dev/null 2>&1; then
-    sed -i "s|${pattern}|${replacement}|g" "$file"
-  else
-    sed -i '' "s|${pattern}|${replacement}|g" "$file"
-  fi
-}
-
-replace_in_file "__PROJECT_NAME__" "${PROJECT_NAME}" CLAUDE.md
-replace_in_file "__PROJECT_DESC__" "${PROJECT_DESC}" CLAUDE.md
-replace_in_file "__TECH_STACK__" "${TECH_STACK}" CLAUDE.md
-replace_in_file "__TEST_FRAMEWORK__" "${TEST_FRAMEWORK}" CLAUDE.md
-replace_in_file "__DEV_CMD__" "${DEV_CMD}" CLAUDE.md
-replace_in_file "__BUILD_CMD__" "${BUILD_CMD}" CLAUDE.md
-replace_in_file "__TEST_CMD__" "${TEST_CMD}" CLAUDE.md
-replace_in_file "__LINT_CMD__" "${LINT_CMD}" CLAUDE.md
 
 # Добавить ссылки на memory bank и ADR для Standard+
 if [ "$METHOD_LEVEL" -ge 2 ]; then
   cat >> CLAUDE.md << 'EOF'
 
 ## Memory Bank
-- @memory-bank/ — персистентная память проекта (читать в начале каждой задачи)
+В начале каждой сессии прочитай все файлы в `memory-bank/`:
+- `projectbrief.md`, `productContext.md`, `systemPatterns.md`,
+  `techContext.md`, `activeContext.md`, `progress.md`
 
 ## Architecture Decision Records
-- See /adr/ for detailed decisions (заполняется по мере принятия решений)
+Прочитай файлы в `adr/` для понимания принятых архитектурных решений
+(заполняется по мере принятия решений).
+
+## Project Rules
+Дополнительные правила в `.claude/rules/`:
+- `security.md` — обязательные правила безопасности (читать всегда)
+- `git.md` — конвенции git
+- `testing.md` — правила тестирования (читать при работе с тестами)
 EOF
 fi
 
@@ -303,73 +353,142 @@ print_substep "CLAUDE.local.md создан"
 
 print_step "Настраиваю .claude/settings.json (permissions + hooks)..."
 
-cat > .claude/settings.json << SETTINGS_EOF
-{
-  "permissions": {
-    "allow": [
-      "Read(**/*)",
-      "Edit(**/*)",
-      "Write(**/*)",
-      "Bash(${PKG_MANAGER} *)",
-      "Bash(git *)",
-      "Bash(${TEST_CMD}*)",
-      "Bash(npx *)",
-      "Bash(node *)",
-      "Bash(cat *)",
-      "Bash(ls *)",
-      "Bash(find *)",
-      "Bash(grep *)",
-      "Bash(head *)",
-      "Bash(tail *)",
-      "Bash(wc *)",
-      "Bash(mkdir *)",
-      "Bash(cp *)",
-      "Bash(mv *)"
-    ],
-    "deny": [
-      "Read(.env*)",
-      "Read(**/*.pem)",
-      "Read(**/*.key)",
-      "Read(**/credentials/**)",
-      "Read(**/secrets/**)",
-      "Read(**/.ssh/**)",
-      "Bash(curl *)",
-      "Bash(wget *)",
-      "Bash(rm -rf /)*",
-      "Bash(*--force*main*)",
-      "Bash(sudo *)"
-    ]
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "command": "${FORMAT_CMD} \"\$CLAUDE_FILE_PATH\" 2>/dev/null || true"
-      },
-      {
-        "matcher": "Edit|Write",
-        "command": "${LINT_FILE_CMD} \"\$CLAUDE_FILE_PATH\" 2>/dev/null || true"
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "command": "if echo \"\$CLAUDE_BASH_COMMAND\" | grep -qE 'rm -rf /|git push.*--force.*main|DROP TABLE|DROP DATABASE'; then echo 'BLOCKED: potentially destructive command' >&2; exit 1; fi"
-      }
-    ],
-    "Stop": [
-      {
-        "command": "${TEST_CMD} 2>&1 | tail -30 || true"
-      }
-    ]
-  }
-}
-SETTINGS_EOF
+# Генерируем JSON через python3 — избегаем ада экранирования и невалидного JSON.
+# Формат хуков: PostToolUse/PreToolUse → matcher + hooks: [{type:"command", command:"..."}].
+# Хуки получают данные через stdin как JSON, поэтому используем jq для парсинга.
+# shellcheck disable=SC2016  # single quotes намеренно: python читает переменные через os.environ
+PKG_MANAGER_ENV="$PKG_MANAGER" \
+TEST_CMD_ENV="$TEST_CMD" \
+DEV_CMD_ENV="$DEV_CMD" \
+BUILD_CMD_ENV="$BUILD_CMD" \
+LINT_CMD_ENV="$LINT_CMD" \
+FORMAT_CMD_ENV="$FORMAT_CMD" \
+LINT_FILE_CMD_ENV="$LINT_FILE_CMD" \
+python3 -c '
+import json, os, shlex
 
-print_substep "Permissions настроены (deny: .env, .pem, .key, secrets)"
-print_substep "PostToolUse хуки: auto-format + auto-lint"
-print_substep "PreToolUse хук: блокировка деструктивных команд"
-print_substep "Stop хук: автозапуск тестов при завершении задачи"
+pkg = os.environ["PKG_MANAGER_ENV"]
+fmt = os.environ["FORMAT_CMD_ENV"]
+lint_file = os.environ["LINT_FILE_CMD_ENV"]
+
+# Хук auto-format/auto-lint:
+# 1. Читает JSON из stdin (передаёт Claude Code).
+# 2. Извлекает file_path из tool_input через jq.
+# 3. Запускает форматтер и линтер, ошибки подавляет (не блокирует основной поток).
+post_edit_cmd = (
+    "f=\"$(jq -r \x27.tool_input.file_path // empty\x27 2>/dev/null)\"; "
+    "if [ -n \"$f\" ] && [ -f \"$f\" ]; then "
+    f"  {fmt} \"$f\" >/dev/null 2>&1 || true; "
+    f"  {lint_file} \"$f\" >/dev/null 2>&1 || true; "
+    "fi; exit 0"
+)
+
+# Хук блокировки деструктивных команд:
+# 1. Извлекает команду из tool_input.command через jq.
+# 2. Матчит опасные паттерны: rm -rf /, git push --force main/master, DROP TABLE/DATABASE.
+# 3. Exit 2 — корректный код для отказа, сообщение идёт в Claude как обратная связь.
+danger_regex = (
+    "(^|[[:space:]])rm[[:space:]]+-rf?[[:space:]]+/+([[:space:]]|$)"
+    "|git[[:space:]]+push[[:space:]]+(--force|-f)([[:space:]]+|[[:space:]]+.*[[:space:]]+)(main|master)([[:space:]]|$)"
+    "|DROP[[:space:]]+(TABLE|DATABASE)"
+)
+pre_bash_cmd = (
+    "cmd=\"$(jq -r \x27.tool_input.command // empty\x27 2>/dev/null)\"; "
+    f"if printf %s \"$cmd\" | grep -qiE {shlex.quote(danger_regex)}; then "
+    "  echo \"BLOCKED by Claude Code Forge hook: potentially destructive command\" >&2; "
+    "  exit 2; "
+    "fi; exit 0"
+)
+
+settings = {
+    "permissions": {
+        "allow": [
+            "Read(**/*)",
+            "Edit(**/*)",
+            "Write(**/*)",
+            f"Bash({pkg} install)",
+            f"Bash({pkg} run *)",
+            f"Bash({pkg} test*)",
+            "Bash(npx *)",
+            "Bash(node *)",
+            "Bash(git status)",
+            "Bash(git status *)",
+            "Bash(git diff*)",
+            "Bash(git log*)",
+            "Bash(git show*)",
+            "Bash(git add *)",
+            "Bash(git commit*)",
+            "Bash(git branch*)",
+            "Bash(git checkout *)",
+            "Bash(git fetch*)",
+            "Bash(git pull*)",
+            "Bash(ls *)",
+            "Bash(find *)",
+            "Bash(grep *)",
+            "Bash(rg *)",
+            "Bash(wc *)",
+            "Bash(mkdir *)",
+            "Bash(cp *)",
+            "Bash(mv *)"
+        ],
+        "deny": [
+            "Read(.env)",
+            "Read(.env.*)",
+            "Read(**/.env)",
+            "Read(**/.env.*)",
+            "Read(**/*.pem)",
+            "Read(**/*.key)",
+            "Read(**/credentials/**)",
+            "Read(**/secrets/**)",
+            "Read(**/.ssh/**)",
+            "Bash(curl *)",
+            "Bash(wget *)",
+            "Bash(sudo *)",
+            "Bash(sudo)",
+            "Bash(rm -rf /)",
+            "Bash(rm -rf /*)",
+            "Bash(rm -rf /home*)",
+            "Bash(rm -rf ~)",
+            "Bash(rm -rf ~/*)",
+            "Bash(git push --force*)",
+            "Bash(git push -f*)",
+            "Bash(git reset --hard*)",
+            "Bash(git clean -f*)",
+            "Bash(git checkout .)",
+            "Bash(git restore .)"
+        ]
+    },
+    "hooks": {
+        "PostToolUse": [
+            {
+                "matcher": "Edit|Write",
+                "hooks": [
+                    {"type": "command", "command": post_edit_cmd}
+                ]
+            }
+        ],
+        "PreToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {"type": "command", "command": pre_bash_cmd}
+                ]
+            }
+        ]
+    }
+}
+
+with open(".claude/settings.json", "w", encoding="utf-8") as f:
+    json.dump(settings, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+'
+
+print_substep "Permissions настроены (deny: .env, .pem, .key, secrets, force push, hard reset)"
+print_substep "PostToolUse хук: auto-format + auto-lint (через jq + stdin)"
+print_substep "PreToolUse хук: блокировка rm -rf /, force push main, DROP TABLE (exit 2)"
+if [ "$JQ_AVAILABLE" -eq 0 ]; then
+  print_warning "jq не найден — хуки Claude Code не будут работать. Установите: apt install jq | brew install jq"
+fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # .claudeignore
@@ -418,11 +537,12 @@ out/
 .DS_Store
 Thumbs.db
 
-# Lock files (шум в контексте)
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-poetry.lock
+# Lock files (раскомментируйте, если хотите исключить из контекста.
+# По умолчанию оставлены — нужны для отладки проблем с зависимостями).
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+# poetry.lock
 
 # Archives
 *.zip
@@ -441,7 +561,7 @@ print_substep ".claudeignore создан"
 
 print_step "Создаю кастомные slash-команды..."
 
-# /project:plan — планирование задачи с учётом ADR
+# /plan — планирование задачи с учётом ADR
 cat > .claude/commands/plan.md << 'EOF'
 Спланируй реализацию задачи. Следуй процессу:
 
@@ -461,13 +581,13 @@ cat > .claude/commands/plan.md << 'EOF'
 
 Результат: структурированный план с шагами, файлами, тестами и рисками.
 EOF
-print_substep "/project:plan — планирование с учётом ADR"
+print_substep "/plan — планирование с учётом ADR"
 
-# /project:implement — реализация по TDD
+# /implement — реализация по TDD
 cat > .claude/commands/implement.md << 'EOF'
 Реализуй задачу по TDD-циклу. Строго следуй процессу:
 
-1. Прочитай план задачи (если нет — сначала выполни /project:plan)
+1. Прочитай план задачи (если нет — сначала выполни /plan)
 2. Для каждого шага плана:
    a. RED: Напиши ОДИН падающий тест. Запусти — убедись что падает.
    b. GREEN: Напиши МИНИМАЛЬНЫЙ код для прохождения теста. Запусти — убедись что проходит.
@@ -480,9 +600,9 @@ cat > .claude/commands/implement.md << 'EOF'
 
 Задача: $ARGUMENTS
 EOF
-print_substep "/project:implement — TDD-реализация"
+print_substep "/implement — TDD-реализация"
 
-# /project:handoff — передача контекста
+# /handoff — передача контекста
 cat > .claude/commands/handoff.md << 'EOF'
 Создай handoff-документ для передачи контекста следующей сессии.
 
@@ -520,9 +640,9 @@ cat > .claude/commands/handoff.md << 'EOF'
 - memory-bank/progress.md
 - TASKS.md
 EOF
-print_substep "/project:handoff — передача контекста между сессиями"
+print_substep "/handoff — передача контекста между сессиями"
 
-# /project:review — ревью кода
+# /review — ревью кода
 cat > .claude/commands/review.md << 'EOF'
 Проведи code review изменений. Процесс:
 
@@ -543,9 +663,9 @@ cat > .claude/commands/review.md << 'EOF'
 
 Скоуп ревью: $ARGUMENTS
 EOF
-print_substep "/project:review — ревью кода"
+print_substep "/review — ревью кода"
 
-# /project:freshstart — начало новой сессии
+# /freshstart — начало новой сессии
 cat > .claude/commands/freshstart.md << 'EOF'
 Начало новой рабочей сессии. Выполни:
 
@@ -561,9 +681,9 @@ cat > .claude/commands/freshstart.md << 'EOF'
    - Рекомендуемая следующая задача (из TASKS.md с учётом зависимостей)
    - Потенциальные проблемы
 EOF
-print_substep "/project:freshstart — восстановление контекста"
+print_substep "/freshstart — восстановление контекста"
 
-# /project:compact-save — безопасное сжатие
+# /compact-save — безопасное сжатие
 cat > .claude/commands/compact-save.md << 'EOF'
 Подготовка к компакции контекста. Перед вызовом /compact:
 
@@ -576,9 +696,9 @@ cat > .claude/commands/compact-save.md << 'EOF'
    - Промежуточные результаты отладки
 4. Сообщи, что можно безопасно вызвать: /compact [рекомендуемая инструкция]
 EOF
-print_substep "/project:compact-save — безопасная компакция"
+print_substep "/compact-save — безопасная компакция"
 
-# /project:adr — создание ADR
+# /adr — создание ADR
 if [ "$METHOD_LEVEL" -ge 2 ]; then
 cat > .claude/commands/adr.md << 'EOF'
 Создай Architecture Decision Record. Процесс:
@@ -620,10 +740,10 @@ Proposed | Accepted | Deprecated | Superseded by ADR-XXX
 
 Тема решения: $ARGUMENTS
 EOF
-print_substep "/project:adr — создание Architecture Decision Record"
+print_substep "/adr — создание Architecture Decision Record"
 fi
 
-# /project:security-audit
+# /security-audit
 cat > .claude/commands/security-audit.md << 'EOF'
 Проведи аудит безопасности. Проверь:
 
@@ -641,7 +761,7 @@ cat > .claude/commands/security-audit.md << 'EOF'
 
 Скоуп: $ARGUMENTS
 EOF
-print_substep "/project:security-audit — аудит безопасности"
+print_substep "/security-audit — аудит безопасности"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Модульные правила (.claude/rules/)
@@ -650,14 +770,10 @@ print_substep "/project:security-audit — аудит безопасности"
 print_step "Создаю модульные правила..."
 
 cat > .claude/rules/testing.md << 'EOF'
----
-paths:
-  - "**/*.test.*"
-  - "**/*.spec.*"
-  - "**/tests/**"
-  - "**/__tests__/**"
----
 # Testing Rules
+Применяется при работе с файлами тестов (`*.test.*`, `*.spec.*`, `tests/`, `__tests__/`).
+Загружается вручную через ссылку в CLAUDE.md.
+
 - НИКОГДА не модифицируй тест, чтобы он проходил с текущей реализацией
 - Каждый тест проверяет ОДНО поведение (один assert на семантику)
 - Именование: `should [expected behavior] when [condition]`
@@ -667,7 +783,9 @@ EOF
 print_substep "testing.md — правила тестирования"
 
 cat > .claude/rules/security.md << 'EOF'
-# Security Rules (загружаются всегда)
+# Security Rules
+Загружается через ссылку в CLAUDE.md (читать в начале каждой задачи).
+
 - НИКОГДА не хардкодить секреты, пароли, API-ключи, токены
 - Все секреты — через переменные окружения
 - SQL: ТОЛЬКО параметризованные запросы
@@ -679,7 +797,9 @@ EOF
 print_substep "security.md — правила безопасности"
 
 cat > .claude/rules/git.md << 'EOF'
-# Git Rules (загружаются всегда)
+# Git Rules
+Загружается через ссылку в CLAUDE.md (читать перед коммитом).
+
 - Коммиты: conventional commits (feat:, fix:, refactor:, docs:, test:, chore:)
 - Один коммит = одно логическое изменение
 - НЕ коммитить: сгенерированные файлы, node_modules, .env, билд-артефакты
@@ -879,8 +999,8 @@ TODO: Где и как деплоить
 1. Задачи берутся из TASKS.md с учётом зависимостей
 2. Каждая задача начинается с Plan Mode
 3. Реализация строго по TDD: RED → GREEN → REFACTOR
-4. Code review через /project:review
-5. Handoff через /project:handoff в конце сессии
+4. Code review через /review
+5. Handoff через /handoff в конце сессии
 EOF
 print_substep "PLANNING.md"
 
@@ -937,7 +1057,7 @@ EOF
 print_substep "docs/ARCHITECTURE.md"
 
 if [ "$METHOD_LEVEL" -ge 2 ]; then
-  cat > adr/000-template.md << 'EOF'
+  cat > adr/_template.md << 'EOF'
 # ADR-NNN: [Заголовок]
 
 ## Status
@@ -960,7 +1080,7 @@ Proposed | Accepted | Deprecated | Superseded by ADR-XXX
 ### Negative
 - ...
 EOF
-  print_substep "adr/000-template.md"
+  print_substep "adr/_template.md"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1015,7 +1135,7 @@ EOF
 
 Результат: таблица с оценками + итоговый вердикт GO/NO-GO
 EOF
-  print_substep "/project:gate-check — проверка качественных ворот"
+  print_substep "/gate-check — проверка качественных ворот"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1117,7 +1237,7 @@ cat > INIT_PROMPT.md << 'PROMPT_EOF'
 
 ## Фаза 3: Quality Gate (если уровень Full)
 
-11. Выполни /project:gate-check
+11. Выполни /gate-check
 12. Если NO-GO — доработай недостающее
 13. Если GO — переходи к реализации
 
@@ -1140,12 +1260,31 @@ print_substep "INIT_PROMPT.md — мастер-промпт для первог�
 
 print_step "Инициализирую Git..."
 
-git init -q
-git add -A
-git commit -q -m "chore: bootstrap project with Claude Code methodology (level ${METHOD_LEVEL})" 2>/dev/null || \
-  print_warning "Git commit пропущен (настройте git config user.name / user.email)"
+# Явная ветка main, чтобы не зависеть от системного init.defaultBranch.
+# Старые версии git (<2.28) не поддерживают -b, фолбэк через переименование.
+if git init -q -b main 2>/dev/null; then
+  :
+else
+  git init -q
+  git symbolic-ref HEAD refs/heads/main 2>/dev/null || true
+fi
 
-print_substep "Первый коммит создан"
+# Проверка наличия git config user.name/user.email — без них commit упадёт молча.
+if [ -z "$(git config --get user.name 2>/dev/null || true)" ] || \
+   [ -z "$(git config --get user.email 2>/dev/null || true)" ]; then
+  print_warning "git config user.name / user.email не настроены — первый коммит пропущен."
+  print_warning "Настройте: git config user.name 'Your Name' && git config user.email 'you@example.com'"
+  GIT_COMMIT_OK=0
+else
+  git add -A
+  if git commit -q -m "chore: bootstrap project with Claude Code methodology (level ${METHOD_LEVEL})"; then
+    GIT_COMMIT_OK=1
+    print_substep "Первый коммит создан (ветка main)"
+  else
+    GIT_COMMIT_OK=0
+    print_warning "git commit упал — проверьте состояние репозитория вручную."
+  fi
+fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Итоговый отчёт
@@ -1177,20 +1316,29 @@ echo -e "  ${CYAN}2.${NC} Запусти Claude Code и вставь содер�
 echo -e "     ${DIM}cat INIT_PROMPT.md${NC}"
 echo ""
 echo -e "  ${CYAN}3.${NC} Или используй slash-команду:"
-echo -e "     ${DIM}/project:freshstart${NC}"
+echo -e "     ${DIM}/freshstart${NC}"
 echo ""
 echo -e "  ${CYAN}4.${NC} Доступные команды:"
-echo -e "     ${DIM}/project:plan [задача]${NC}      — спланировать задачу"
-echo -e "     ${DIM}/project:implement [задача]${NC} — реализовать по TDD"
-echo -e "     ${DIM}/project:handoff${NC}            — передать контекст"
-echo -e "     ${DIM}/project:review${NC}             — code review"
-echo -e "     ${DIM}/project:compact-save${NC}       — безопасная компакция"
-echo -e "     ${DIM}/project:security-audit${NC}     — аудит безопасности"
+echo -e "     ${DIM}/plan [задача]${NC}      — спланировать задачу"
+echo -e "     ${DIM}/implement [задача]${NC} — реализовать по TDD"
+echo -e "     ${DIM}/handoff${NC}            — передать контекст"
+echo -e "     ${DIM}/review${NC}             — code review"
+echo -e "     ${DIM}/compact-save${NC}       — безопасная компакция"
+echo -e "     ${DIM}/security-audit${NC}     — аудит безопасности"
 if [ "$METHOD_LEVEL" -ge 2 ]; then
-echo -e "     ${DIM}/project:adr [тема]${NC}         — создать ADR"
+echo -e "     ${DIM}/adr [тема]${NC}         — создать ADR"
 fi
 if [ "$METHOD_LEVEL" -ge 3 ]; then
-echo -e "     ${DIM}/project:gate-check${NC}         — проверка Quality Gate"
+echo -e "     ${DIM}/gate-check${NC}         — проверка Quality Gate"
+fi
+echo ""
+
+if [ "${GIT_COMMIT_OK:-0}" -eq 0 ]; then
+  print_warning "Первый git-коммит не был создан (см. предыдущие предупреждения)."
+fi
+if [ "$JQ_AVAILABLE" -eq 0 ]; then
+  print_warning "jq не установлен — хуки Claude Code (auto-format, защита от опасных команд) не будут работать."
+  print_warning "Установите: apt install jq | brew install jq"
 fi
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

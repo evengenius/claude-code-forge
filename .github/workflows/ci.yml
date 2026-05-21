@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          severity: warning
+          scandir: .
+          additional_files: init-claude-project.sh
+
+  smoke-test:
+    name: Smoke test bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq python3 git
+
+      - name: Configure git
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.com"
+          git config --global init.defaultBranch main
+
+      - name: Run bootstrap (level 1)
+        run: |
+          mkdir -p /tmp/smoke && cd /tmp/smoke
+          printf 'A smoke test project\n2\n1\n' | bash "$GITHUB_WORKSPACE/init-claude-project.sh" smoke-min
+
+      - name: Validate generated structure (level 1)
+        run: |
+          cd /tmp/smoke/smoke-min
+          test -f CLAUDE.md
+          test -f CLAUDE.local.md
+          test -f .claude/settings.json
+          test -f .claudeignore
+          test -f .gitignore
+          test -f PRD.md
+          test -f PLANNING.md
+          test -f TASKS.md
+          test -f INIT_PROMPT.md
+          test -d .claude/commands
+          test -d .claude/rules
+          # JSON должен быть валидным
+          python3 -c "import json; json.load(open('.claude/settings.json'))"
+          # Хук должен использовать stdin/jq, а не несуществующие env-переменные
+          grep -q 'jq -r' .claude/settings.json
+          ! grep -q 'CLAUDE_FILE_PATH\|CLAUDE_BASH_COMMAND' .claude/settings.json
+          # Команды без устаревшего префикса /project:
+          ! grep -rq '/project:' .claude/commands/ || (echo "found /project: in commands" && exit 1)
+
+      - name: Run bootstrap (level 3 = Full)
+        run: |
+          mkdir -p /tmp/smoke-full && cd /tmp/smoke-full
+          printf 'Full smoke\n4\n3\n' | bash "$GITHUB_WORKSPACE/init-claude-project.sh" smoke-full
+
+      - name: Validate generated structure (level 3)
+        run: |
+          cd /tmp/smoke-full/smoke-full
+          test -d memory-bank
+          test -d adr
+          test -d .claude/quality-gates
+          test -d specs
+          test -f .claude/commands/adr.md
+          test -f .claude/commands/gate-check.md
+          test -f adr/_template.md
+          # _template.md, не 000-template.md
+          ! test -f adr/000-template.md
+          python3 -c "import json; json.load(open('.claude/settings.json'))"
+
+      - name: Reject invalid project name
+        run: |
+          mkdir -p /tmp/reject && cd /tmp/reject
+          if printf 'desc\n1\n2\n' | bash "$GITHUB_WORKSPACE/init-claude-project.sh" "../evil"; then
+            echo "FAIL: invalid name was accepted"; exit 1
+          fi
+          echo "OK: invalid name rejected"
+
+      - name: Reject overwrite of existing directory
+        run: |
+          mkdir -p /tmp/overwrite && cd /tmp/overwrite
+          mkdir existing
+          if printf 'desc\n1\n2\n' | bash "$GITHUB_WORKSPACE/init-claude-project.sh" existing; then
+            echo "FAIL: existing dir was overwritten"; exit 1
+          fi
+          echo "OK: overwrite refused"
